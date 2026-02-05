@@ -1,0 +1,47 @@
+name: Build DroidShield Ecosystem
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  # --- JOB 1: CLIENT (AGENT) ---
+  build-client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      # This builds the APK inside 'client_app'
+      - name: Build Client APK
+        uses: ArtemSBulgakov/buildozer-action-v1@v3
+        id: build-client
+        with:
+          workdir: client_app
+          buildozer_version: master
+
+      - name: Upload Client APK
+        uses: actions/upload-artifact@v2
+        with:
+          name: DroidShield-Client-APK
+          path: client_app/bin/*.apk
+
+  # --- JOB 2: HQ (SERVER) ---
+  build-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      # This builds the APK inside 'server_app'
+      - name: Build Server APK
+        uses: ArtemSBulgakov/buildozer-action-v1@v3
+        id: build-server
+        with:
+          workdir: server_app
+          buildozer_version: master
+
+      - name: Upload Server APK
+        uses: actions/upload-artifact@v2
+        with:
+          name: DroidShield-HQ-APK
+          path: server_app/bin/*.apk
