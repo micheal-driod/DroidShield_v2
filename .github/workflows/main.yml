@@ -1,5 +1,4 @@
 name: Build DroidShield Ecosystem
-
 on:
   push:
     branches: [ main ]
@@ -10,15 +9,21 @@ jobs:
   build-client:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      # FIXED: Using HeaTTheatR action to prevent 'chown user' error
       - name: Build Client APK
-        uses: HeaTTheatR/buildozer-action@v1
-        id: build-client
-        with:
-          workdir: client_app
-          buildozer_version: master
+        # We run the command directly in the official Kivy container
+        # This bypasses the permission bugs in the other actions
+        run: |
+          # Fix permissions for the folder so Docker can write to it
+          sudo chmod -R 777 client_app
+          
+          # Run Buildozer inside Docker
+          docker run --rm \
+            -v ${{ github.workspace }}/client_app:/home/user/hostcwd \
+            kivy/buildozer \
+            android debug
 
       - name: Upload Client APK
         uses: actions/upload-artifact@v4
@@ -30,15 +35,19 @@ jobs:
   build-server:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      # FIXED: Using HeaTTheatR action to prevent 'chown user' error
       - name: Build Server APK
-        uses: HeaTTheatR/buildozer-action@v1
-        id: build-server
-        with:
-          workdir: server_app
-          buildozer_version: master
+        run: |
+          # Fix permissions
+          sudo chmod -R 777 server_app
+          
+          # Run Buildozer inside Docker
+          docker run --rm \
+            -v ${{ github.workspace }}/server_app:/home/user/hostcwd \
+            kivy/buildozer \
+            android debug
 
       - name: Upload Server APK
         uses: actions/upload-artifact@v4
