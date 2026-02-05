@@ -10,18 +10,18 @@ jobs:
   build-client:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4  # Upgraded to v4
+      - uses: actions/checkout@v4
 
       # This builds the APK inside 'client_app'
       - name: Build Client APK
-        uses: ArtemSBulgakov/buildozer-action-v1@v3
+        uses: ArtemSBulgakov/buildozer-action@v1
         id: build-client
         with:
           workdir: client_app
           buildozer_version: master
 
       - name: Upload Client APK
-        uses: actions/upload-artifact@v4  # Upgraded to v4 (CRITICAL FIX)
+        uses: actions/upload-artifact@v4
         with:
           name: DroidShield-Client-APK
           path: client_app/bin/*.apk
@@ -30,18 +30,18 @@ jobs:
   build-server:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4  # Upgraded to v4
+      - uses: actions/checkout@v4
 
       # This builds the APK inside 'server_app'
       - name: Build Server APK
-        uses: ArtemSBulgakov/buildozer-action-v1@v3
+        uses: ArtemSBulgakov/buildozer-action@v1
         id: build-server
         with:
           workdir: server_app
           buildozer_version: master
 
       - name: Upload Server APK
-        uses: actions/upload-artifact@v4  # Upgraded to v4 (CRITICAL FIX)
+        uses: actions/upload-artifact@v4
         with:
           name: DroidShield-HQ-APK
           path: server_app/bin/*.apk
