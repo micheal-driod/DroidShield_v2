@@ -7,61 +7,66 @@ from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
-from kivy.clock import Clock
+from kivy.clock import Clock, mainthread
 
 class ServerGUI(BoxLayout):
     def __init__(self, **kwargs):
-        super().__init__(orientation='vertical', padding=10, spacing=10, **kwargs)
+        super().__init__(orientation='vertical', padding=15, spacing=10, **kwargs)
         
         # --- HEADER ---
-        self.add_widget(Label(text="[b]DROIDSHIELD HQ SERVER[/b]", markup=True, size_hint=(1, 0.1), font_size='24sp'))
+        self.add_widget(Label(text="[b]DROIDSHIELD HQ (STABLE)[/b]", markup=True, size_hint=(1, 0.1), font_size='22sp'))
         
-        # --- CONFIGURATION SECTION ---
-        config_layout = BoxLayout(orientation='vertical', size_hint=(1, 0.15), spacing=5)
+        # --- CONFIG (Key & IP) ---
+        config_box = BoxLayout(orientation='vertical', size_hint=(1, 0.2), spacing=5)
         
-        # IP Display
-        self.ip_label = Label(text="Detecting IP...", color=(0, 1, 0, 1))
+        # IP Label
+        self.ip_label = Label(text="Initializing Network...", color=(0, 1, 1, 1), font_size='18sp')
+        config_box.add_widget(self.ip_label)
         
-        # Secret Key Input (The User sets this now!)
-        key_layout = BoxLayout(spacing=10)
-        key_layout.add_widget(Label(text="Set Network Key:", size_hint=(0.3, 1)))
-        self.key_input = TextInput(text="DEFAULT-KEY", multiline=False, write_tab=False)
-        key_layout.add_widget(self.key_input)
+        # Secret Key Input
+        key_row = BoxLayout(spacing=10)
+        key_row.add_widget(Label(text="Security Key:", size_hint=(0.3, 1)))
+        self.key_input = TextInput(text="ALPHA-77", multiline=False, write_tab=False)
+        key_row.add_widget(self.key_input)
+        config_box.add_widget(key_row)
         
-        config_layout.add_widget(self.ip_label)
-        config_layout.add_widget(key_layout)
-        self.add_widget(config_layout)
+        self.add_widget(config_box)
 
-        # --- LOG CONSOLE ---
+        # --- LOG DISPLAY ---
         self.log_layout = BoxLayout(orientation='vertical', size_hint_y=None)
         self.log_layout.bind(minimum_height=self.log_layout.setter('height'))
         
-        scroll = ScrollView(size_hint=(1, 0.6))
+        scroll = ScrollView(size_hint=(1, 0.6), do_scroll_x=False)
         scroll.add_widget(self.log_layout)
         self.add_widget(scroll)
 
         # --- CONTROLS ---
-        self.btn_stop = Button(text="SHUTDOWN SERVER", size_hint=(1, 0.1), background_color=(1, 0, 0, 1))
+        self.btn_stop = Button(text="SHUTDOWN SYSTEM", size_hint=(1, 0.1), background_color=(0.8, 0, 0, 1))
         self.btn_stop.bind(on_press=self.stop_server)
         self.add_widget(self.btn_stop)
 
-        # Server Variables
+        # Internals
         self.server_socket = None
         self.running = False
-        self.clients = {} 
+        self.clients = {}
         
-        # Start Server automatically in background
+        # Start safely
         threading.Thread(target=self.start_server, daemon=True).start()
 
+    @mainthread
     def log(self, message, color=(1, 1, 1, 1)):
+        # This function is now THREAD-SAFE. It will never crash the app.
         time_str = datetime.datetime.now().strftime("%H:%M:%S")
-        full_msg = f"[{time_str}] {message}"
-        print(full_msg)
-        Clock.schedule_once(lambda dt: self._add_log_label(full_msg, color))
-
-    def _add_log_label(self, text, color):
-        lbl = Label(text=text, size_hint_y=None, height=40, color=color, halign='left', text_size=(self.width, None))
+        lbl = Label(
+            text=f"[{time_str}] {message}", 
+            size_hint_y=None, 
+            height=60, 
+            color=color, 
+            halign='left', 
+            text_size=(self.width - 20, None)
+        )
         self.log_layout.add_widget(lbl)
+        # Auto-scroll could go here if needed
 
     def get_ip(self):
         try:
@@ -74,65 +79,65 @@ class ServerGUI(BoxLayout):
             return "127.0.0.1"
 
     def start_server(self):
-        self.running = True
-        host = "0.0.0.0"
-        port = 9000
-        
-        my_ip = self.get_ip()
-        Clock.schedule_once(lambda dt: self.ip_label.setter('text')(f"HQ IP: {my_ip} | Port: {port}"))
-        self.log(f"Server Online. Waiting for agents...")
+        try:
+            self.running = True
+            host = "0.0.0.0"
+            port = 9000
+            
+            my_ip = self.get_ip()
+            Clock.schedule_once(lambda dt: self.ip_label.setter('text')(f"IP: {my_ip} | PORT: {port}"))
+            self.log(f"Server Online on {my_ip}", (0, 1, 0, 1))
 
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.bind((host, port))
-        self.server_socket.listen(5)
+            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.server_socket.bind((host, port))
+            self.server_socket.listen(5)
 
-        while self.running:
-            try:
+            while self.running:
                 client_sock, address = self.server_socket.accept()
                 threading.Thread(target=self.handle_client, args=(client_sock, address), daemon=True).start()
-            except Exception as e:
-                if self.running:
-                    self.log(f"Error: {e}", (1, 0, 0, 1))
+                
+        except Exception as e:
+            self.log(f"CRITICAL SERVER ERROR: {e}", (1, 0, 0, 1))
 
     def handle_client(self, client_sock, address):
         ip = address[0]
-        self.log(f"Connection attempt from {ip}...", (1, 1, 0, 1))
+        self.log(f"Incoming connection: {ip}", (1, 1, 0, 1))
         
         try:
-            # 1. SECURITY CHECK
+            # 1. Auth Handshake
             client_sock.send("AUTH_REQUIRED".encode('utf-8'))
-            client_sock.settimeout(10)
+            client_sock.settimeout(15) # 15s timeout
+            
             received_key = client_sock.recv(1024).decode('utf-8').strip()
             
-            # 2. COMPARE WITH THE TEXT BOX ON SCREEN
-            # We use the key that is CURRENTLY typed in the box
-            current_server_key = self.key_input.text
+            # Use the key currently in the text box
+            required_key = self.key_input.text
             
-            if received_key == current_server_key:
-                # SUCCESS
-                self.log(f"✅ Agent {ip} Verified.", (0, 1, 0, 1))
+            if received_key == required_key:
                 client_sock.send("ACCESS_GRANTED".encode('utf-8'))
-                client_sock.settimeout(None)
+                client_sock.settimeout(None) # Remove timeout for chat
                 self.clients[client_sock] = ip
-                self.broadcast(f"Agent {ip} connected.", client_sock)
+                self.log(f"✅ Verified: {ip}", (0, 1, 0, 1))
+                self.broadcast(f"System: Agent {ip} joined.", client_sock)
             else:
-                # FAILURE
-                self.log(f"🚨 INTRUDER {ip} KICKED! (Wrong Key)", (1, 0, 0, 1))
+                self.log(f"⛔ Blocked {ip} (Wrong Key)", (1, 0, 0, 1))
                 client_sock.send("ACCESS_DENIED".encode('utf-8'))
                 client_sock.close()
                 return
 
-            # 3. CHAT LOOP
+            # 2. Chat Loop
             while self.running:
-                msg = client_sock.recv(1024).decode('utf-8')
-                if not msg: break
+                data = client_sock.recv(1024)
+                if not data: break
+                msg = data.decode('utf-8')
                 
                 log_msg = f"Agent {ip}: {msg}"
                 self.log(log_msg)
                 self.broadcast(log_msg, client_sock)
 
-        except:
-            pass # Silent disconnect
+        except Exception as e:
+            pass # Client disconnected, normal behavior
         finally:
             if client_sock in self.clients:
                 del self.clients[client_sock]
@@ -148,8 +153,9 @@ class ServerGUI(BoxLayout):
 
     def stop_server(self, instance):
         self.running = False
-        if self.server_socket:
-            self.server_socket.close()
+        try:
+            if self.server_socket: self.server_socket.close()
+        except: pass
         App.get_running_app().stop()
 
 class DroidShieldHQ(App):
