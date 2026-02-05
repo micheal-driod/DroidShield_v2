@@ -12,9 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # This builds the APK inside 'client_app'
+      # FIXED: Using HeaTTheatR action to prevent 'chown user' error
       - name: Build Client APK
-        uses: ArtemSBulgakov/buildozer-action@v1
+        uses: HeaTTheatR/buildozer-action@v1
         id: build-client
         with:
           workdir: client_app
@@ -32,9 +32,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # This builds the APK inside 'server_app'
+      # FIXED: Using HeaTTheatR action to prevent 'chown user' error
       - name: Build Server APK
-        uses: ArtemSBulgakov/buildozer-action@v1
+        uses: HeaTTheatR/buildozer-action@v1
         id: build-server
         with:
           workdir: server_app
