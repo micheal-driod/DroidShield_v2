@@ -1,210 +1,188 @@
 import socket
 import threading
-import struct
-import math
 from kivy.app import App
-from kivy.clock import Clock
-from kivy.storage.jsonstore import JsonStore
-from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
 from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
-from kivy.core.window import Window
-from kivy.utils import platform
+from kivy.uix.scrollview import ScrollView
+from kivy.clock import Clock
+from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
 
-# --- CONFIG ---
-CYBER_GREEN = (0, 1, 0.4, 1)
-ALERT_RED = (1, 0, 0, 1)
-DARK_BG = (0.05, 0.05, 0.05, 1)
-store = JsonStore('secure_data.json')
+class ClientGUI(TabbedPanel):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.do_default_tab = False
+        self.client_socket = None
+        self.connected = False
 
-# --- ENCRYPTION ---
-def encrypt_decrypt(text, key):
-    try: return ''.join(chr(ord(c) ^ ord(k)) for c, k in zip(text, key * len(text)))
-    except: return text
-
-# --- AUDIO ENGINE (CLIENT SIDE) ---
-class AudioEngine:
-    def __init__(self):
-        self.is_android = platform == 'android'
-        self.rec = None; self.track = None; self.pa = None; self.stream = None
-        self.rate = 16000; self.chunk = 1024
+        # --- TAB 1: CONNECTION & CHAT ---
+        self.tab_connect = TabbedPanelItem(text="Comms Link")
+        layout_connect = BoxLayout(orientation='vertical', padding=10, spacing=10)
         
-        if self.is_android:
-            try:
-                from jnius import autoclass
-                self.AudioRecord = autoclass('android.media.AudioRecord')
-                self.AudioTrack = autoclass('android.media.AudioTrack')
-                self.AudioFormat = autoclass('android.media.AudioFormat')
-                self.MediaRecorder = autoclass('android.media.MediaRecorder$AudioSource')
-                self.AudioManager = autoclass('android.media.AudioManager')
-                self.src = self.MediaRecorder.MIC
-                self.stream_type = self.AudioManager.STREAM_VOICE_CALL
-                self.sr = self.rate
-                self.chin = self.AudioFormat.CHANNEL_IN_MONO; self.chout = self.AudioFormat.CHANNEL_OUT_MONO
-                self.enc = self.AudioFormat.ENCODING_PCM_16BIT
-                self.min_buf_rec = self.AudioRecord.getMinBufferSize(self.sr, self.chin, self.enc) * 2
-                self.min_buf_play = self.AudioTrack.getMinBufferSize(self.sr, self.chout, self.enc) * 2
-            except: pass
+        # Inputs
+        self.ip_input = TextInput(text="192.168.1.X", hint_text="Server IP", size_hint=(1, 0.1), multiline=False)
+        self.key_input = TextInput(text="ALPHA-TANGO-77", hint_text="Secret Key", size_hint=(1, 0.1), multiline=False, password=True)
+        
+        # Connect Button
+        self.btn_connect = Button(text="ESTABLISH SECURE LINK", size_hint=(1, 0.1), background_color=(0, 0.5, 1, 1))
+        self.btn_connect.bind(on_press=self.toggle_connection)
+        
+        # Chat Display
+        self.chat_layout = BoxLayout(orientation='vertical', size_hint_y=None)
+        self.chat_layout.bind(minimum_height=self.chat_layout.setter('height'))
+        scroll = ScrollView(size_hint=(1, 0.5))
+        scroll.add_widget(self.chat_layout)
+        
+        # Message Input
+        msg_box = BoxLayout(size_hint=(1, 0.1))
+        self.msg_input = TextInput(hint_text="Type message...", multiline=False)
+        self.btn_send = Button(text="SEND", size_hint=(0.2, 1))
+        self.btn_send.bind(on_press=self.send_message)
+        msg_box.add_widget(self.msg_input)
+        msg_box.add_widget(self.btn_send)
+        
+        layout_connect.add_widget(Label(text="TARGET IP:", size_hint=(1, 0.05)))
+        layout_connect.add_widget(self.ip_input)
+        layout_connect.add_widget(Label(text="ENCRYPTION KEY:", size_hint=(1, 0.05)))
+        layout_connect.add_widget(self.key_input)
+        layout_connect.add_widget(self.btn_connect)
+        layout_connect.add_widget(scroll)
+        layout_connect.add_widget(msg_box)
+        self.tab_connect.add_widget(layout_connect)
+
+        # --- TAB 2: VULNERABILITY SCANNER ---
+        self.tab_scan = TabbedPanelItem(text="Scanner")
+        layout_scan = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        
+        self.scan_ip_input = TextInput(hint_text="IP to Scan", size_hint=(1, 0.1), multiline=False)
+        self.btn_scan = Button(text="RUN PORT VULNERABILITY SCAN", size_hint=(1, 0.1), background_color=(1, 0.5, 0, 1))
+        self.btn_scan.bind(on_press=self.run_scan)
+        
+        self.scan_results = Label(text="Ready to scan...", size_hint=(1, 0.7), valign='top', halign='left')
+        self.scan_results.bind(size=self.scan_results.setter('text_size'))
+        
+        layout_scan.add_widget(Label(text="TARGET RECON:", size_hint=(1, 0.05)))
+        layout_scan.add_widget(self.scan_ip_input)
+        layout_scan.add_widget(self.btn_scan)
+        layout_scan.add_widget(self.scan_results)
+        self.tab_scan.add_widget(layout_scan)
+
+        # --- TAB 3: SETTINGS / EXIT ---
+        self.tab_settings = TabbedPanelItem(text="System")
+        layout_settings = BoxLayout(orientation='vertical', padding=20)
+        btn_exit = Button(text="KILL SWITCH (EXIT APP)", background_color=(1, 0, 0, 1))
+        btn_exit.bind(on_press=self.exit_app)
+        layout_settings.add_widget(btn_exit)
+        self.tab_settings.add_widget(layout_settings)
+
+        self.add_widget(self.tab_connect)
+        self.add_widget(self.tab_scan)
+        self.add_widget(self.tab_settings)
+
+    def log_chat(self, msg, color=(1,1,1,1)):
+        Clock.schedule_once(lambda dt: self.chat_layout.add_widget(Label(text=msg, size_hint_y=None, height=40, color=color)))
+
+    def toggle_connection(self, instance):
+        if not self.connected:
+            threading.Thread(target=self.connect_to_server, daemon=True).start()
         else:
-            try: import pyaudio; self.pa = pyaudio.PyAudio()
-            except: pass
+            self.disconnect()
 
-    def start(self):
-        if self.is_android:
-            try:
-                self.rec = self.AudioRecord(self.src, self.sr, self.chin, self.enc, self.min_buf_rec)
-                self.track = self.AudioTrack(self.stream_type, self.sr, self.chout, self.enc, self.min_buf_play, 1)
-                self.rec.startRecording(); self.track.play()
-                return True
-            except: return False
-        elif self.pa:
-            try:
-                self.stream = self.pa.open(format=self.pa.get_format_from_width(2), channels=1, rate=self.rate, input=True, output=True, frames_per_buffer=self.chunk)
-                return True
-            except: return False
-        return False
-
-    def read(self):
-        if self.is_android and self.rec:
-            try:
-                b = bytearray(self.chunk)
-                r = self.rec.read(b, 0, self.chunk)
-                if r > 0: return bytes(b[:r])
-            except: pass
-        elif self.stream:
-            try: return self.stream.read(self.chunk, exception_on_overflow=False)
-            except: pass
-        return None
-
-    def write(self, data):
-        if self.is_android and self.track: 
-            try: self.track.write(data, 0, len(data))
-            except: pass
-        elif self.stream:
-            try: self.stream.write(data)
-            except: pass
-
-    def stop(self):
-        if self.is_android:
-            try: self.rec.stop(); self.track.stop()
-            except: pass
-        elif self.stream:
-            try: self.stream.stop_stream(); self.stream.close()
-            except: pass
-
-audio = AudioEngine()
-
-# --- APP UI ---
-class DroidClient(App):
-    def build(self):
-        Window.clearcolor = DARK_BG
-        if platform == 'android':
-            from android.permissions import request_permissions, Permission
-            request_permissions([Permission.INTERNET, Permission.RECORD_AUDIO, Permission.MODIFY_AUDIO_SETTINGS])
+    def connect_to_server(self):
+        ip = self.ip_input.text
+        key = self.key_input.text
         
-        self.sm = ScreenManager()
-        self.sm.add_widget(self.login_screen())
-        self.sm.add_widget(self.comms_screen())
-        return self.sm
-
-    def login_screen(self):
-        s = Screen(name='login')
-        l = BoxLayout(orientation='vertical', padding=30, spacing=20)
-        l.add_widget(Label(text="[ AGENT LOGIN ]", font_size='24sp', color=CYBER_GREEN))
-        
-        self.ip_in = TextInput(hint_text="HQ Server IP", multiline=False, foreground_color=CYBER_GREEN, background_color=(0.1,0.1,0.1,1))
-        self.key_in = TextInput(hint_text="Secret Key", password=True, multiline=False, foreground_color=CYBER_GREEN, background_color=(0.1,0.1,0.1,1))
-        
-        btn = Button(text="CONNECT TO HQ", background_color=CYBER_GREEN, bold=True)
-        btn.bind(on_press=self.connect_to_hq)
-        
-        l.add_widget(self.ip_in); l.add_widget(self.key_in); l.add_widget(btn)
-        s.add_widget(l)
-        return s
-
-    def comms_screen(self):
-        s = Screen(name='comms')
-        l = BoxLayout(orientation='vertical', padding=10, spacing=10)
-        
-        self.status = Label(text="CONNECTING...", size_hint=(1, 0.1), color=CYBER_GREEN)
-        self.history = TextInput(readonly=True, background_color=(0,0,0,1), foreground_color=CYBER_GREEN, size_hint=(1, 0.6))
-        
-        controls = BoxLayout(size_hint=(1, 0.15), spacing=5)
-        self.msg = TextInput(hint_text="Message", multiline=False)
-        btn_send = Button(text="SEND", size_hint=(0.3, 1), background_color=CYBER_GREEN, on_press=self.send_msg)
-        controls.add_widget(self.msg); controls.add_widget(btn_send)
-        
-        self.mic_btn = Button(text="RADIO: OFF", background_color=ALERT_RED, size_hint=(1, 0.15), on_press=self.toggle_mic)
-        
-        l.add_widget(self.status); l.add_widget(self.history); l.add_widget(controls); l.add_widget(self.mic_btn)
-        s.add_widget(l)
-        return s
-
-    def connect_to_hq(self, instance):
-        self.target_ip = self.ip_in.text
-        self.key = self.key_in.text
-        if not self.target_ip: return
-        self.sm.current = 'comms'
-        self.running = True
-        threading.Thread(target=self.network_loop, daemon=True).start()
-        audio.start()
-
-    def network_loop(self):
         try:
-            # TCP (Chat)
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.settimeout(5)
-            self.sock.connect((self.target_ip, 8000))
-            Clock.schedule_once(lambda dt: setattr(self.status, 'text', f"SECURE LINK: {self.target_ip}"))
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((ip, 9000))
             
-            # UDP (Audio) - Send Ping to register
-            self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.udp.sendto(b'PING', (self.target_ip, 8001))
-            
-            threading.Thread(target=self.listen_tcp, daemon=True).start()
-            threading.Thread(target=self.listen_udp, daemon=True).start()
+            # Auth Handshake
+            req = self.client_socket.recv(1024).decode('utf-8')
+            if req == "AUTH_REQUIRED":
+                self.client_socket.send(key.encode('utf-8'))
+                resp = self.client_socket.recv(1024).decode('utf-8')
+                
+                if resp == "ACCESS_GRANTED":
+                    self.connected = True
+                    Clock.schedule_once(lambda dt: self.btn_connect.setter('text')("DISCONNECT"))
+                    Clock.schedule_once(lambda dt: self.btn_connect.setter('background_color')((0, 1, 0, 1)))
+                    self.log_chat("✅ Secure Link Established", (0, 1, 0, 1))
+                    
+                    # Start listening
+                    threading.Thread(target=self.listen_for_messages, daemon=True).start()
+                else:
+                    self.log_chat("⛔ ACCESS DENIED: Invalid Key", (1, 0, 0, 1))
+                    self.client_socket.close()
         except Exception as e:
-            Clock.schedule_once(lambda dt: setattr(self.status, 'text', "CONNECTION FAILED"))
+            self.log_chat(f"Connection Failed: {e}", (1, 0, 0, 1))
 
-    def listen_tcp(self):
-        while self.running:
+    def listen_for_messages(self):
+        while self.connected:
             try:
-                data = self.sock.recv(1024)
-                if data:
-                    msg = encrypt_decrypt(data.decode(), self.key)
-                    Clock.schedule_once(lambda dt, m=msg: setattr(self.history, 'text', self.history.text + "HQ/PEER: " + m + "\n"))
-            except: break
+                msg = self.client_socket.recv(1024).decode('utf-8')
+                if msg:
+                    self.log_chat(msg)
+                else:
+                    break
+            except:
+                break
+        self.disconnect()
 
-    def listen_udp(self):
-        while self.running:
+    def send_message(self, instance):
+        if self.connected and self.msg_input.text:
             try:
-                data, _ = self.udp.recvfrom(4096)
-                audio.write(data)
-            except: pass
+                msg = self.msg_input.text
+                self.client_socket.send(msg.encode('utf-8'))
+                self.log_chat(f"You: {msg}", (0.5, 0.5, 1, 1))
+                self.msg_input.text = ""
+            except:
+                self.log_chat("Send Error", (1, 0, 0, 1))
 
-    def send_msg(self, instance):
-        if self.msg.text:
-            cipher = encrypt_decrypt(self.msg.text, self.key)
-            try: self.sock.send(cipher.encode())
-            except: pass
-            self.history.text += f"ME: {self.msg.text}\n"
-            self.msg.text = ""
+    def disconnect(self):
+        self.connected = False
+        if self.client_socket:
+            self.client_socket.close()
+        Clock.schedule_once(lambda dt: self.btn_connect.setter('text')("ESTABLISH SECURE LINK"))
+        Clock.schedule_once(lambda dt: self.btn_connect.setter('background_color')((0, 0.5, 1, 1)))
+        self.log_chat("Disconnected.", (1, 0.5, 0, 1))
 
-    def toggle_mic(self, instance):
-        self.mic_live = not getattr(self, 'mic_live', False)
-        if self.mic_live:
-            self.mic_btn.text = "RADIO: LIVE"; self.mic_btn.background_color = CYBER_GREEN
-            threading.Thread(target=self.mic_loop, daemon=True).start()
-        else:
-            self.mic_btn.text = "RADIO: OFF"; self.mic_btn.background_color = ALERT_RED
+    def run_scan(self, instance):
+        target_ip = self.scan_ip_input.text
+        if not target_ip:
+            return
+        
+        self.scan_results.text = f"Scanning {target_ip}...\nThis may take a moment."
+        threading.Thread(target=self.perform_scan, args=(target_ip,), daemon=True).start()
 
-    def mic_loop(self):
-        while self.running and self.mic_live:
-            data = audio.read()
-            if data:
-                try: self.udp.sendto(data, (self.target_ip, 8001))
-                except: pass
+    def perform_scan(self, ip):
+        # Basic common ports
+        ports = {21: "FTP", 22: "SSH", 80: "HTTP", 443: "HTTPS", 8080: "Web Proxy"}
+        result_text = f"REPORT FOR {ip}:\n"
+        
+        found_open = False
+        for port, name in ports.items():
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1.0)
+            result = s.connect_ex((ip, port))
+            if result == 0:
+                result_text += f"[OPEN] Port {port} ({name}) - POTENTIAL VULNERABILITY\n"
+                found_open = True
+            s.close()
+            
+        if not found_open:
+            result_text += "No common open ports detected (Secure-ish)."
+            
+        Clock.schedule_once(lambda dt: self.scan_results.setter('text')(result_text))
 
-if __name__ == '__main__': DroidClient().run()
+    def exit_app(self, instance):
+        if self.client_socket:
+            self.client_socket.close()
+        App.get_running_app().stop()
+
+class DroidShieldClient(App):
+    def build(self):
+        return ClientGUI()
+
+if __name__ == '__main__':
+    DroidShieldClient().run()
