@@ -43,7 +43,7 @@ orientation = portrait
 fullscreen = 0
 
 # (list) Permissions
-android.permissions = INTERNET,ACCESS_NETWORK_STATE,RECORD_AUDIO,MODIFY_AUDIO_SETTINGS,WRITE_EXTERNAL_STORAGE,WAKE_LOCK
+android.permissions = INTERNET, ACCESS_NETWORK_STATE, WIFI_STATE, ACCESS_WIFI_STATE, CHANGE_WIFI_STATE, WAKE_LOCK
 
 # (int) Target Android API, should be as high as possible.
 # API 33 is the standard for 2025 builds
