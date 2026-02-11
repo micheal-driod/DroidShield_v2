@@ -1,0 +1,117 @@
+🛡️ DROID SHIELD: Tactical Field Comms System
+A raw TCP socket-based communication suite designed for command-and-control operations between a PC Headquarters and Android Field Agents.
+
+📋 Overview
+Droid Shield is a custom-built communication infrastructure that establishes a secure, authenticated link between a central server (Headquarters) and mobile clients (Field Agents).
+
+Unlike standard chat apps that rely on heavy HTTP protocols or third-party servers (like WhatsApp/Discord), Droid Shield uses Raw TCP Sockets over an SSH Tunnel. This ensures direct, low-latency control with zero intermediaries.
+
+The system is designed to bypass NAT restrictions and firewalls using a custom Active Handshake Protocol, ensuring connectivity even over unstable cellular networks or deep-packet inspection tunnels.
+
+🏗️ Architecture
+The system operates on a Star Topology:
+
+The HQ (Server): * Runs on a Desktop PC (Windows/Linux/Mac).
+
+Provides a Command Console (GUI) for the operator.
+
+Manages authentication, banning, kicking, and message routing.
+
+The Tunnel (Transport Layer): * Uses SSH Remote Forwarding (via Pinggy.io) to expose the local localhost:9000 port to the public internet.
+
+Allows the Android device to connect to the PC without port forwarding on the router.
+
+The Agent (Client): * Runs on Android (built via Buildozer/Kivy).
+
+Features a "Safe Mode" bootloader to prevent crashes on startup.
+
+Includes Chat, Voice Radio (PTT), and a Network Vulnerability Scanner.
+
+🛠️ Key Features
+🖥️ Commander Console (PC)
+Traffic Monitoring: Real-time logs of all connections and messages.
+
+Active Defense: Ban IPs, Kick Users, and Whitelist management.
+
+Dual-Stack Networking: Listens on both IPv4 and IPv6 interfaces.
+
+Global Broadcast: Send alerts to all connected agents simultaneously.
+
+📱 Field Agent App (Android)
+Secure Uplink: Password-protected socket connection.
+
+Voice Radio: Push-To-Talk (PTT) sends voice transcripts to HQ and other agents.
+
+Net Scanner: Built-in port scanner to analyze target IP addresses from the field.
+
+Crash Resilience: Custom "SafeLoader" wrapper prevents the app from closing on errors, displaying debug logs instead.
+
+🔧 Technical Innovation: The "Active Handshake"
+One of the major engineering challenges in this project was the "Ghost Call" Phenomenon.
+
+The Problem
+When using SSH Tunnels (like Ngrok or Pinggy) with standard TCP sockets, the client often connects to the tunnel endpoint, but the tunnel fails to immediately notify the server script. The client sits waiting for a prompt that never comes, resulting in a timeout.
+
+The Solution: Active Beaconing
+Instead of the standard server.accept() -> wait for client data flow, Droid Shield utilizes an Aggressive Beacon Protocol:
+
+As soon as a connection is detected, the Server does not wait.
+
+The Server immediately enters a Beacon Loop, sending the byte string AUTH\n every second for 15 seconds.
+
+This "shouting" forces data through the tunnel buffer, waking up the Client.
+
+The Client catches the beacon, sends the Session Key, and the link is established.
+
+Python
+# Code Snippet: The Active Beacon
+for _ in range(15):
+    client_socket.send(b"AUTH\n")  # Force packet through tunnel
+    try:
+        data = client_socket.recv(1024)
+        if data == SESSION_KEY: break
+    except: continue
+🚀 Installation & Usage
+Prerequisites
+Python 3.10+
+
+pip install kivy
+
+pip install plyer (for Android features)
+
+1. Start Headquarters (PC)
+Run the server script on your computer.
+
+Bash
+python server_hq.py
+Set a session password when prompted.
+
+The server will listen on Port 9000.
+
+2. Establish Uplink (Tunnel)
+Open a terminal on your PC and run the SSH command to expose port 9000.
+
+Bash
+ssh -p 443 -R0:127.0.0.1:9000 tcp@a.pinggy.io
+Copy the public address provided (e.g., tcp://krfbu.a.pinggy.link:45501).
+
+3. Deploy Agent (Android)
+Option A: Run client.py on a PC for testing.
+
+Option B: Compile for Android using Buildozer:
+
+Bash
+buildozer android debug deploy run
+
+
+In the App: Paste the Pinggy address, enter the password, and hit LINK.📜 Disclaimer
+This tool is a Proof of Concept for socket programming and network tunneling.
+
+The traffic is encoded but not encrypted with SSL/TLS (unless wrapped).
+
+Designed for educational purposes and private network administration.
+
+🤝 Contributing
+Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+
+Built with Gemini AI and ☕ by SEGUN MICHAEL ADEGBITE
