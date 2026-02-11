@@ -1,229 +1,249 @@
 import socket
 import threading
-import datetime
-from kivy.app import App
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
-from kivy.uix.scrollview import ScrollView
-from kivy.uix.button import Button
-from kivy.uix.textinput import TextInput
-from kivy.uix.spinner import Spinner
-from kivy.clock import Clock, mainthread
-from kivy.utils import platform
+import time
+import tkinter as tk
+from tkinter import scrolledtext, simpledialog, messagebox
 
 # --- CONFIGURATION ---
-PORT = 9000
+# Listens on ALL interfaces (IPv4/IPv6) to catch the Tunnel connection
+HOST = ''  
+PORT = 9000       
 
-class ServerGUI(BoxLayout):
-    def __init__(self, **kwargs):
-        super().__init__(orientation='vertical', padding=15, spacing=10, **kwargs)
-        
-        # 1. HEADER
-        self.add_widget(Label(text="[b]DROIDSHIELD COMMAND CENTER[/b]", markup=True, size_hint=(1, 0.08), font_size='22sp', color=(0, 1, 0, 1)))
-        
-        # 2. SERVER CONTROLS (Key & Power)
-        control_box = BoxLayout(size_hint=(1, 0.1), spacing=10)
-        self.key_input = TextInput(text="ALPHA-77", multiline=False, password=True, size_hint=(0.4, 1), hint_text="Secret Key")
-        self.btn_power = Button(text="INITIALIZE SYSTEM", background_color=(0, 1, 0, 1), bold=True)
-        self.btn_power.bind(on_press=self.toggle_server)
-        
-        control_box.add_widget(Label(text="KEY:", size_hint=(0.1, 1)))
-        control_box.add_widget(self.key_input)
-        control_box.add_widget(self.btn_power)
-        self.add_widget(control_box)
+# --- GLOBAL STORAGE ---
+SESSION_KEY = "123456" 
+BLOCKED_IPS = set()
+clients = {}      # {socket: name}
+client_ips = {}   # {socket: ip}
 
-        # 3. MONITORING DASHBOARD (Split View)
-        dashboard = BoxLayout(size_hint=(1, 0.4), spacing=10)
-        
-        # Left: Active Agents
-        agent_box = BoxLayout(orientation='vertical')
-        agent_box.add_widget(Label(text="[b]ACTIVE AGENTS[/b]", markup=True, size_hint=(1, 0.15), color=(0, 1, 1, 1)))
-        self.agent_list_lbl = Label(text="No Agents Connected", valign='top', halign='left')
-        self.agent_list_lbl.bind(size=self.agent_list_lbl.setter('text_size'))
-        agent_box.add_widget(self.agent_list_lbl)
-        
-        # Right: Security & Block List
-        security_box = BoxLayout(orientation='vertical')
-        security_box.add_widget(Label(text="[b]BLOCKED INTRUDERS[/b]", markup=True, size_hint=(1, 0.15), color=(1, 0, 0, 1)))
-        
-        # Spinner to select IP to unblock
-        self.block_spinner = Spinner(text='Select IP to Unblock', values=(), size_hint=(1, 0.2))
-        self.btn_unblock = Button(text="UNBLOCK SELECTED", size_hint=(1, 0.2), background_color=(1, 0.5, 0, 1))
-        self.btn_unblock.bind(on_press=self.unblock_ip)
-        
-        self.blocked_lbl = Label(text="System Secure.", valign='top', halign='left', color=(1, 0.3, 0.3, 1))
-        self.blocked_lbl.bind(size=self.blocked_lbl.setter('text_size'))
-        
-        security_box.add_widget(self.blocked_lbl)
-        security_box.add_widget(self.block_spinner)
-        security_box.add_widget(self.btn_unblock)
-        
-        dashboard.add_widget(agent_box)
-        dashboard.add_widget(security_box)
-        self.add_widget(dashboard)
+class TacticalServer:
+    def __init__(self, master):
+        self.master = master
+        master.title("FIELD HEADQUARTERS - COMMANDER")
+        master.geometry("900x650")
+        master.configure(bg='black')
 
-        # 4. LIVE LOGS
-        self.add_widget(Label(text="SYSTEM LOGS:", size_hint=(1, 0.05)))
-        self.log_layout = BoxLayout(orientation='vertical', size_hint_y=None)
-        self.log_layout.bind(minimum_height=self.log_layout.setter('height'))
-        
-        scroll = ScrollView(size_hint=(1, 0.35))
-        scroll.add_widget(self.log_layout)
-        self.add_widget(scroll)
+        # --- HEADER ---
+        self.lbl_title = tk.Label(master, text="DROID SHIELD: COMMANDER", 
+                                font=("Courier", 22, "bold"), fg="#00ff00", bg="black")
+        self.lbl_title.pack(pady=10)
 
-        # INTERNALS
-        self.server_socket = None
-        self.running = False
-        self.clients = {}         # socket -> ip
-        self.failed_attempts = {} # ip -> count
-        self.blocked_ips = []     # list of strings
+        # --- LOG WINDOW ---
+        self.log_area = scrolledtext.ScrolledText(master, width=100, height=22, 
+                                                font=("Courier", 10), bg="#111", fg="#00ff00",
+                                                insertbackground="white", state='disabled')
+        self.log_area.pack(pady=5, padx=10)
 
-    # --- UI UPDATES ---
-    @mainthread
-    def log(self, msg, color=(1, 1, 1, 1)):
-        time_str = datetime.datetime.now().strftime("%H:%M:%S")
-        lbl = Label(text=f"[{time_str}] {msg}", size_hint_y=None, height=40, color=color, markup=True, halign='left', text_size=(self.width, None))
-        self.log_layout.add_widget(lbl)
+        # --- STATUS INDICATORS ---
+        self.lbl_status = tk.Label(master, text="STATUS: STANDBY", 
+                                 font=("Courier", 12, "bold"), fg="yellow", bg="black")
+        self.lbl_status.pack(pady=5)
 
-    @mainthread
-    def update_lists(self):
-        # Update Active Agents
-        if self.clients:
-            agents = "\n".join([f"• {ip}" for ip in self.clients.values()])
-            self.agent_list_lbl.text = agents
-        else:
-            self.agent_list_lbl.text = "No Agents Connected"
+        # --- CONTROLS ---
+        control_frame = tk.LabelFrame(master, text=" TACTICAL OPERATIONS ", 
+                                    font=("Courier", 10, "bold"), bg="black", fg="white", bd=2)
+        control_frame.pack(pady=10, padx=10, fill="x")
 
-        # Update Blocked List
-        if self.blocked_ips:
-            blocked = "\n".join([f"• {ip}" for ip in self.blocked_ips])
-            self.blocked_lbl.text = blocked
-            self.block_spinner.values = self.blocked_ips
-        else:
-            self.blocked_lbl.text = "System Secure."
-            self.block_spinner.values = ()
-            self.block_spinner.text = "No Blocked IPs"
+        # Buttons
+        btn_ban = tk.Button(control_frame, text="[ BAN IP ]", command=self.cmd_ban,
+                          font=("Courier", 10, "bold"), bg="#550000", fg="white", width=14)
+        btn_ban.grid(row=0, column=0, padx=15, pady=10)
 
-    # --- SERVER LOGIC ---
-    def toggle_server(self, instance):
-        if not self.running:
-            self.running = True
-            self.btn_power.text = "SHUTDOWN SYSTEM"
-            self.btn_power.background_color = (1, 0, 0, 1)
-            self.key_input.disabled = True
-            threading.Thread(target=self.start_server, daemon=True).start()
-        else:
-            self.stop_server()
+        btn_unblock = tk.Button(control_frame, text="[ UNBLOCK ]", command=self.cmd_unblock,
+                              font=("Courier", 10, "bold"), bg="#003366", fg="white", width=14)
+        btn_unblock.grid(row=0, column=1, padx=15, pady=10)
 
-    def unblock_ip(self, instance):
-        target = self.block_spinner.text
-        if target in self.blocked_ips:
-            self.blocked_ips.remove(target)
-            if target in self.failed_attempts:
-                del self.failed_attempts[target]
-            self.log(f"Manual Override: Unblocked {target}", (0, 1, 0, 1))
-            self.update_lists()
+        btn_kick = tk.Button(control_frame, text="[ KICK USER ]", command=self.cmd_kick,
+                           font=("Courier", 10, "bold"), bg="#555500", fg="white", width=14)
+        btn_kick.grid(row=0, column=2, padx=15, pady=10)
 
-    def start_server(self):
-        try:
-            host = "0.0.0.0"
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            
-            self.log(f"Server Initialized on {ip}", (0, 1, 1, 1))
+        btn_list = tk.Button(control_frame, text="[ ROSTER ]", command=self.cmd_list,
+                           font=("Courier", 10, "bold"), bg="#004400", fg="white", width=14)
+        btn_list.grid(row=0, column=3, padx=15, pady=10)
 
-            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_socket.bind((host, PORT))
-            self.server_socket.listen(5)
+        # --- START BUTTON ---
+        self.btn_start = tk.Button(master, text="INITIATE SERVER SEQUENCE", command=self.start_sequence,
+                                 font=("Courier", 14, "bold"), bg="#005500", fg="white", width=35)
+        self.btn_start.pack(pady=15)
 
-            while self.running:
-                client_sock, address = self.server_socket.accept()
-                threading.Thread(target=self.handle_client, args=(client_sock, address), daemon=True).start()
+    # --- THREAD-SAFE LOGGING ---
+    def log(self, message):
+        self.master.after(0, self._log_internal, message)
 
-        except Exception as e:
-            self.log(f"Server Error: {e}", (1, 0, 0, 1))
-            self.stop_server()
+    def _log_internal(self, message):
+        self.log_area.config(state='normal')
+        self.log_area.insert(tk.END, f"> {message}\n")
+        self.log_area.see(tk.END)
+        self.log_area.config(state='disabled')
 
-    def handle_client(self, client_sock, address):
-        ip = address[0]
-        
-        # 1. BLOCK CHECK
-        if ip in self.blocked_ips:
-            client_sock.close()
+    # --- COMMANDS ---
+    def cmd_ban(self):
+        target = simpledialog.askstring("BAN IP", "Enter IP to Blacklist:")
+        if target:
+            BLOCKED_IPS.add(target)
+            self.log(f"SECURITY: IP {target} added to BLACKLIST.")
+            self.kick_by_ip(target)
+
+    def cmd_unblock(self):
+        target = simpledialog.askstring("UNBLOCK", "Enter IP to Unblock:")
+        if target in BLOCKED_IPS:
+            BLOCKED_IPS.remove(target)
+            self.log(f"SECURITY: IP {target} Removed from Blacklist.")
+
+    def cmd_kick(self):
+        name = simpledialog.askstring("KICK", "Enter Agent Name:")
+        if name: self.kick_user(name)
+
+    def cmd_list(self):
+        self.log("-" * 30)
+        self.log(f"ACTIVE AGENTS: {list(clients.values())}")
+        self.log(f"BLOCKED IPS:   {list(BLOCKED_IPS)}")
+        self.log("-" * 30)
+
+    # --- NETWORK ACTIONS ---
+    def kick_user(self, name):
+        target_sock = None
+        for sock, n in clients.items():
+            if n == name:
+                target_sock = sock
+                break
+        if target_sock:
+            self.remove_client(target_sock)
+            self.log(f"KICK: {name} removed from session.")
+
+    def kick_by_ip(self, ip):
+        to_remove = [s for s, i in client_ips.items() if i == ip]
+        for s in to_remove:
+            self.remove_client(s)
+
+    def broadcast(self, msg, sender=None):
+        if isinstance(msg, str): msg = msg.encode('utf-8')
+        for sock in list(clients.keys()):
+            if sock != sender:
+                try: sock.send(msg)
+                except: self.remove_client(sock)
+
+    def remove_client(self, sock):
+        if sock in clients:
+            name = clients[sock]
+            del clients[sock]
+            if sock in client_ips: del client_ips[sock]
+            try: sock.close()
+            except: pass
+            self.broadcast(f"[SYSTEM] {name} Offline.".encode('utf-8'))
+            self.log(f"DISCONNECT: {name}")
+
+    # ==================================================
+    #        THE PROTOCOL: "ACTIVE HANDSHAKE"
+    # ==================================================
+    def handle_client(self, client_socket, addr):
+        ip = addr[0]
+        if ip in BLOCKED_IPS:
+            client_socket.close()
             return
 
-        self.log(f"Verifying: {ip}...", (1, 1, 0, 1))
+        self.log(f"CONNECTION DETECTED: {ip}")
+        client_ips[client_socket] = ip
 
         try:
-            client_sock.send("AUTH".encode('utf-8'))
-            client_sock.settimeout(10)
-            key = client_sock.recv(1024).decode('utf-8').strip()
+            # We set a short timeout for the handshake phase
+            client_socket.settimeout(2.0) 
+            authenticated = False
             
-            if key == self.key_input.text:
-                # SUCCESS
-                client_sock.send("OK".encode('utf-8'))
-                client_sock.settimeout(None)
-                
-                self.clients[client_sock] = ip
-                if ip in self.failed_attempts: del self.failed_attempts[ip]
-                
-                self.log(f"✅ Access Granted: {ip}", (0, 1, 0, 1))
-                self.update_lists()
-                
-                # CHAT/RADIO LOOP
-                while self.running:
-                    msg = client_sock.recv(1024).decode('utf-8')
-                    if not msg: break
+            # THE BEACON LOOP:
+            # We aggressively send "AUTH" every second for 15 seconds.
+            # This forces the message through the tunnel to the client.
+            for i in range(15):
+                try:
+                    # 1. Send Beacon
+                    client_socket.send(b"AUTH\n")
                     
-                    full_msg = f"Agent {ip}: {msg}"
-                    self.log(full_msg)
-                    self.broadcast(full_msg, client_sock)
+                    # 2. Check for Reply (Non-blocking-ish)
+                    try:
+                        data = client_socket.recv(1024).decode('utf-8').strip()
+                        if data:
+                            # 3. Verify Key
+                            if data == SESSION_KEY:
+                                authenticated = True
+                                break # Success! Exit the loop.
+                            else:
+                                self.log(f"SECURITY ALERT: Bad Key from {ip}")
+                                client_socket.send(b"WRONG_KEY\n")
+                                client_socket.close()
+                                return
+                    except socket.timeout:
+                        # No reply yet? Just loop back and send AUTH again.
+                        continue 
+                        
+                except Exception as e:
+                    self.log(f"Handshake Comms Error: {e}")
+                    break
+                
+                time.sleep(1) # Wait 1s between beacons
+
+            if authenticated:
+                name = f"AGENT_{ip.split('.')[-1]}"
+                clients[client_socket] = name
+                client_socket.send(b"OK\n") # Send Final OK
+                client_socket.settimeout(None) # Remove timeout for chat
+                
+                self.log(f"ACCESS GRANTED: {name}")
+                self.broadcast(f"[SYSTEM] {name} Joined.".encode('utf-8'))
+                
+                # CHAT LOOP
+                while True:
+                    data = client_socket.recv(1024)
+                    if not data: break
+                    
+                    try:
+                        text = data.decode('utf-8')
+                        if "RADIO:" in text:
+                            self.log(f"[VOICE] {text}")
+                            self.broadcast(data, client_socket) # Forward Voice
+                        else:
+                            self.log(f"[CHAT] {text}")
+                            self.broadcast(data, client_socket) # Forward Chat
+                    except: pass
             else:
-                # FAIL
-                client_sock.send("FAIL".encode('utf-8'))
-                self.handle_fail(ip)
-                client_sock.close()
+                self.log(f"TIMEOUT: {ip} failed to authenticate (No Key Sent).")
+                client_socket.close()
 
-        except: pass
-        finally:
-            if client_sock in self.clients:
-                del self.clients[client_sock]
-                self.update_lists()
-            try: client_sock.close()
-            except: pass
-
-    def handle_fail(self, ip):
-        count = self.failed_attempts.get(ip, 0) + 1
-        self.failed_attempts[ip] = count
-        self.log(f"⚠️ Auth Fail {count}/3 for {ip}", (1, 0.5, 0, 1))
+        except Exception as e:
+            self.log(f"CRITICAL ERROR: {e}")
+            client_socket.close()
         
-        if count >= 3:
-            if ip not in self.blocked_ips:
-                self.blocked_ips.append(ip)
-                self.log(f"🚨 BLOCKED INTRUDER: {ip}", (1, 0, 0, 1))
-                self.update_lists()
+        if client_socket in clients:
+            self.remove_client(client_socket)
 
-    def broadcast(self, msg, sender_sock):
-        for sock in list(self.clients.keys()):
-            if sock != sender_sock:
-                try: sock.send(msg.encode('utf-8'))
-                except: pass
+    def start_server_thread(self):
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            # BIND TO ALL INTERFACES
+            server.bind((HOST, PORT))
+            server.listen(5)
+            self.master.after(0, lambda: self.lbl_status.config(text="STATUS: ONLINE (LISTENING ON 9000)", fg="#00ff00"))
+            self.log(f"SERVER STARTED ON LOCAL PORT {PORT}")
+            self.log(f"WAITING FOR TUNNEL CONNECTIONS...")
+            
+            while True:
+                client, addr = server.accept()
+                threading.Thread(target=self.handle_client, args=(client, addr), daemon=True).start()
+        except Exception as e:
+            self.log(f"CRITICAL ERROR: {e}")
+            self.master.after(0, lambda: self.lbl_status.config(text="STATUS: ERROR", fg="red"))
 
-    def stop_server(self):
-        self.running = False
-        try: self.server_socket.close()
-        except: pass
-        self.btn_power.text = "INITIALIZE SYSTEM"
-        self.btn_power.background_color = (0, 1, 0, 1)
-        self.key_input.disabled = False
-        self.log("System Shutdown.", (1, 0.5, 0, 1))
+    def start_sequence(self):
+        global SESSION_KEY
+        
+        # Set Password
+        key = simpledialog.askstring("SECURITY", "Set Session Password:", show='*')
+        if not key: return
+        
+        SESSION_KEY = key
+        self.btn_start.config(state='disabled')
+        threading.Thread(target=self.start_server_thread, daemon=True).start()
 
-class DroidShieldHQ(App):
-    def build(self):
-        return ServerGUI()
-
-if __name__ == '__main__':
-    DroidShieldHQ().run()
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = TacticalServer(root)
+    root.mainloop()
