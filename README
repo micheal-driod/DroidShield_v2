@@ -1,75 +1,86 @@
-🛡️ DROID SHIELD: Tactical Field Comms System
-A raw TCP socket-based communication suite designed for command-and-control operations between a PC Headquarters and Android Field Agents.
+🛡️ DROID SHIELD: Encrypted Tactical Field Comms
+A military-grade, raw TCP socket communication suite designed for secure command-and-control operations between a PC Headquarters and Android Field Agents.
 
 📋 Overview
 Droid Shield is a custom-built communication infrastructure that establishes a secure, authenticated link between a central server (Headquarters) and mobile clients (Field Agents).
 
-Unlike standard chat apps that rely on heavy HTTP protocols or third-party servers (like WhatsApp/Discord), Droid Shield uses Raw TCP Sockets over an SSH Tunnel. This ensures direct, low-latency control with zero intermediaries.
+Unlike standard chat apps that rely on heavy HTTP protocols or third-party servers, Droid Shield uses Raw TCP Sockets over an SSH Tunnel. This ensures direct, low-latency control with zero intermediaries.
 
-The system is designed to bypass NAT restrictions and firewalls using a custom Active Handshake Protocol, ensuring connectivity even over unstable cellular networks or deep-packet inspection tunnels.
+🔒 NOW UPGRADED: All traffic is secured using Fernet (AES-128) Symmetric Encryption. Messages, voice transcripts, and commands are scrambled before leaving the device, making them unreadable to packet sniffers or man-in-the-middle attacks.
 
 🏗️ Architecture
 The system operates on a Star Topology:
 
-The HQ (Server): * Runs on a Desktop PC (Windows/Linux/Mac).
+The HQ (Server):
 
-Provides a Command Console (GUI) for the operator.
+Runs on a Desktop PC (Windows/Linux/Mac).
 
-Manages authentication, banning, kicking, and message routing.
+Provides a Tactical Commander Console (GUI).
 
-The Tunnel (Transport Layer): * Uses SSH Remote Forwarding (via Pinggy.io) to expose the local localhost:9000 port to the public internet.
+Manages encryption keys, banning, and "Remote Destruct" commands.
 
-Allows the Android device to connect to the PC without port forwarding on the router.
+The Tunnel (Transport Layer):
 
-The Agent (Client): * Runs on Android (built via Buildozer/Kivy).
+Uses SSH Remote Forwarding (via Pinggy.io) to expose the local localhost:9000 port to the public internet.
 
-Features a "Safe Mode" bootloader to prevent crashes on startup.
+Bypasses CGNAT and Firewalls without router configuration.
 
-Includes Chat, Voice Radio (PTT), and a Network Vulnerability Scanner.
+The Agent (Client):
+
+Runs on Android (built via Buildozer/Kivy).
+
+Features a "Safe Mode" bootloader to prevent crashes.
+
+Includes Encrypted Chat, Voice Radio (PTT), and a Network Vulnerability Scanner.
 
 🛠️ Key Features
 🖥️ Commander Console (PC)
-Traffic Monitoring: Real-time logs of all connections and messages.
+Global Kill Switch: A single button to instantly terminate all active connections and wipe the server session in emergencies.
 
-Active Defense: Ban IPs, Kick Users, and Whitelist management.
+Remote Destruct: Send a CMD_KILL signal to a specific agent, forcing their Android app to crash and close immediately.
 
-Dual-Stack Networking: Listens on both IPv4 and IPv6 interfaces.
+Traffic Monitoring: Real-time decrypted logs of all connections.
 
-Global Broadcast: Send alerts to all connected agents simultaneously.
+Active Defense: IP Banning, Whitelisting, and Intrusion Detection.
 
 📱 Field Agent App (Android)
-Secure Uplink: Password-protected socket connection.
+AES-128 Encryption: Every packet (Chat & Voice) is encrypted with a unique session key derived from the user password.
 
-Voice Radio: Push-To-Talk (PTT) sends voice transcripts to HQ and other agents.
+Voice Radio: Push-To-Talk (PTT) sends encrypted text-to-speech transcripts.
 
 Net Scanner: Built-in port scanner to analyze target IP addresses from the field.
 
-Crash Resilience: Custom "SafeLoader" wrapper prevents the app from closing on errors, displaying debug logs instead.
+Self-Destruct Listener: Constantly listens for the "Kill Signal" from HQ to scrub the app from the screen.
 
-🔧 Technical Innovation: The "Active Handshake"
-One of the major engineering challenges in this project was the "Ghost Call" Phenomenon.
+🔧 Technical Innovation: The "Encrypted Handshake"
+One of the major engineering challenges was the "Ghost Call" Phenomenon combined with Encryption Latency.
 
 The Problem
-When using SSH Tunnels (like Ngrok or Pinggy) with standard TCP sockets, the client often connects to the tunnel endpoint, but the tunnel fails to immediately notify the server script. The client sits waiting for a prompt that never comes, resulting in a timeout.
+When using SSH Tunnels, the client connects, but the tunnel buffer delays the signal. If the server waits passively, the connection times out. Furthermore, standard encryption handshakes fail if the packet is fragmented by the tunnel.
 
 The Solution: Active Beaconing
-Instead of the standard server.accept() -> wait for client data flow, Droid Shield utilizes an Aggressive Beacon Protocol:
+Droid Shield utilizes an Aggressive Encrypted Beacon Protocol:
 
-As soon as a connection is detected, the Server does not wait.
+Beacon Loop: The Server does not wait. It broadcasts an encrypted AUTH_REQUEST token every second.
 
-The Server immediately enters a Beacon Loop, sending the byte string AUTH\n every second for 15 seconds.
+Wake Up: This forces data through the tunnel buffer, waking up the Client.
 
-This "shouting" forces data through the tunnel buffer, waking up the Client.
+Verification: The Client attempts to decrypt the beacon.
 
-The Client catches the beacon, sends the Session Key, and the link is established.
+Wrong Password? Decryption fails -> Connection Dropped.
+
+Correct Password? Client replies AUTH_ACK.
+
+Lock In: The link is established, and the "Kill Switch" listener is activated.
 
 Python
-# Code Snippet: The Active Beacon
+# Code Snippet: The Encrypted Beacon
+auth_token = self.encrypt("AUTH_REQUEST")
 for _ in range(15):
-    client_socket.send(b"AUTH\n")  # Force packet through tunnel
+    client_socket.send(auth_token)  # Force encrypted packet through tunnel
     try:
-        data = client_socket.recv(1024)
-        if data == SESSION_KEY: break
+        data = client_socket.recv(4096)
+        if self.decrypt(data) == "AUTH_ACK": break
     except: continue
 🚀 Installation & Usage
 Prerequisites
@@ -79,12 +90,14 @@ pip install kivy
 
 pip install plyer (for Android features)
 
+pip install cryptography (REQUIRED for Encryption)
+
 1. Start Headquarters (PC)
 Run the server script on your computer.
 
 Bash
 python server_hq.py
-Set a session password when prompted.
+Set a session password when prompted. This generates the Encryption Key.
 
 The server will listen on Port 9000.
 
@@ -96,20 +109,22 @@ ssh -p 443 -R0:127.0.0.1:9000 tcp@a.pinggy.io
 Copy the public address provided (e.g., tcp://krfbu.a.pinggy.link:45501).
 
 3. Deploy Agent (Android)
-Option A: Run client.py on a PC for testing.
+Important: You must add cryptography to your buildozer.spec requirements.
 
-Option B: Compile for Android using Buildozer:
+Ini, TOML
+requirements = python3,kivy==2.2.0,plyer,cryptography,android
+Compile for Android:
 
 Bash
 buildozer android debug deploy run
+In the App: Paste the Pinggy address, enter the exact same password as the server, and hit LINK.
 
+📜 Disclaimer
+This tool is a Proof of Concept for secure socket programming and network tunneling.
 
-In the App: Paste the Pinggy address, enter the password, and hit LINK.📜 Disclaimer
-This tool is a Proof of Concept for socket programming and network tunneling.
+Security: Traffic is encrypted using Fernet (AES-128). The security relies entirely on the strength of the password you choose.
 
-The traffic is encoded but not encrypted with SSL/TLS (unless wrapped).
-
-Designed for educational purposes and private network administration.
+Usage: Designed for educational purposes and private network administration.
 
 🤝 Contributing
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
